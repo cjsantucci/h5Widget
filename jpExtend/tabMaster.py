@@ -2,6 +2,7 @@ from PyQt5.Qt import *
 
 import getpass as gp
 import os
+import argparse as ap
 import sys
 import jpExtend
 from jpExtend.qdlgex import h5dialog
@@ -14,11 +15,11 @@ class tabMaster( gUWidgetBase ):
     Main constructor of all of the tabs
     """
 
-    def __init__( self, **kwargs ):
+    def __init__( self, app= None, qmw= None, *args, **kwargs ):
         
         gUWidgetBase.__init__( self, **kwargs )
         
-        width= 500
+        width= 900
         height= 250
         
 
@@ -81,12 +82,16 @@ def init( persistenDir ):
     
     return pDir
 # end init 
-    
-if __name__ == "__main__": 
-    app     = QApplication( sys.argv )
+
+def main( argv ):
+
+    app     = QApplication( argv )
 #         app.setStyle(QStyleFactory.create("Plastique"))
     qmw     = QMainWindow()
     qmw.setWindowTitle( "Python h5 Plotter" )
     
     pDir= init( ".jpExtend" )
-    tabMaster( persistentDir= pDir, parent=qmw, qmw= qmw, persistentFile= "jpePref.h5" )
+    tabMaster( argv[1:], persistentDir= pDir, parent=qmw, app= app, qmw= qmw, persistentFile= "jpePref.h5" )
+
+if __name__ == "__main__": 
+    main( sys.argv )

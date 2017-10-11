@@ -7,6 +7,18 @@ import sys
 import functools as ft
 from guiUtil.gUBase import gUWidgetBase
 
+class procWindow( QMainWindow ):
+    
+    def __init__( self, parent= None ):
+        QMainWindow.__init__( self, parent )
+        allowClose= True
+    
+    def closeEvent( self, event ):
+        # do stuff
+        if self.allowClose:
+            event.accept() # let the window close
+        else:
+            event.ignore()
 
 class h5dialog( QWidget, gUWidgetBase ):
     """
@@ -207,12 +219,12 @@ class h5dialog( QWidget, gUWidgetBase ):
         onStartup= False
         if self.cbProcessStatusWindow.isChecked():
             onStartup= True
-            
+        
         inputdict= {
             "processRect": QRect( 0, 50, 798, 50 ), \
             "statusRect": QRect( 0, 101, 798, 320 ), \
             "app": self.getQApp(), \
-            "qmw": QMainWindow(), \
+            "qmw": procWindow(), \
             "onStartup": onStartup, \
             "processCommand": cmd, \
              }
@@ -227,12 +239,15 @@ class h5dialog( QWidget, gUWidgetBase ):
             self.scObj.scroller._pyqtSigFinished.connect( self.procFinished )
             self.scObj.qmw.show()
             self.pbExecuteH5.setEnabled( False )
+            self.scObj.qmw.allowClose= False
         except:
             self.pbExecuteH5.setEnabled( True )
+            self.scObj.qmw.allowClose= True
     
     @pyqtSlot()
     def procFinished( self ):
         self.pbExecuteH5.setEnabled( True )
+        self.scObj.qmw.allowClose= True
 #         os.system( fileList[0] )
     
     def _setupPB( self ):

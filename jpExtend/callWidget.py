@@ -4,12 +4,14 @@ Created on Sep 23, 2017
 @author: chris
 '''
 
-from PyQt5.Qt import *
+import functools as ft
 from guiUtil.guidata import guiData
 from guiUtil.gUBase import gUWidgetBase
 from guiUtil.fileSelectListWidget import fileSelectList
 import numpy as np
 import os
+from PyQt5.Qt import *
+import re
 import subprocess as subp
 from threading import Thread
 import traceback
@@ -47,7 +49,11 @@ class boxWidget( QWidget, gUWidgetBase ):
     
     def _initGuiData( self, persistentDir= None, persistentFile= None, prefGroup= None, **kwargs ):
         
-        idd= { "startDir": [os.environ[ 'HOME' ]] }
+        idd= { "startDir": [os.environ[ 'HOME' ]], \
+              "startDir2": [os.environ[ 'HOME' ]], \
+               "xDataVar": "MCLOCK", \
+               "diraddRE": ".py$", \
+                }
         
         guiDataObj= guiData( persistentDir= persistentDir, \
                                persistentFile= persistentFile, \
@@ -55,6 +61,14 @@ class boxWidget( QWidget, gUWidgetBase ):
                                initDefaultDict= idd )
         
         self.guiData= guiDataObj
+        
+    def _save_LE_Data( self, leObjStr, saveStr ):
+        leObj= getattr( self, leObjStr )
+        
+        leObj.setText( leObj.text().strip() )
+        setattr( self.guiData, saveStr, leObj.text().strip() )
+        if getattr( self.guiData, saveStr ) != "":
+            self.guiData.save( saveStr )
     
     def _createOtherWidgetMembers( self ):
         self.pbr= QPushButton( "->" )
@@ -65,8 +79,14 @@ class boxWidget( QWidget, gUWidgetBase ):
         self.fb= QPushButton( "Select Exe(s)")
         self.fb.setMaximumWidth( 90 )
         self.fb.clicked.connect( self._fileSelect )
-        
         self.fcb= QCheckBox( "Directory" )
+        self.diradd_le= QLineEdit( self.guiData.diraddRE )
+        self.diradd_le.setPlaceholderText( "dir only--file regex--.py$ is default" )
+        self.diradd_le.textChanged.connect( ft.partial( self._save_LE_Data, "diradd_le", "diraddRE" ) )
+        
+        self.xdat_le= QLineEdit( self.guiData.xDataVar )
+        self.xdat_le.setPlaceholderText( "T, MCLOCK, _TIME ..." )
+        self.xdat_le.textChanged.connect( ft.partial( self._save_LE_Data, "xdat_le", "xDataVar" ) )
         
         self.exeb= QPushButton( "Execute" )
         self.exeb.clicked.connect( self._executeScripts )
@@ -83,7 +103,7 @@ class boxWidget( QWidget, gUWidgetBase ):
             passList += [ "-p", self.namedPipe ]
         
         if self.xDataVar is not None:
-            passList += [ "--xDataVar", self.xData ]
+            passList += [ "--xDataVar", self.xDataVar ]
         
         sysCommands= []
         threadCommands= []
@@ -130,19 +150,29 @@ class boxWidget( QWidget, gUWidgetBase ):
         qfd.setFileMode( QFileDialog.ExistingFiles )
 #         QAbstractItemView::MultiSelection
         
-        startDir= self.guiData.startDir[0]
-        if not os.path.isdir( startDir ):
-            startDir= os.environ[ "HOME" ]
-            
+        selDir= None 
         if self.fcb.isChecked():
+            startDir= self.guiData.startDir2[0]
+            if not os.path.isdir( startDir ):
+                startDir= os.environ[ "HOME" ]
+                
             selDir= qfd.getExistingDirectory( caption= "select exe(s)", directory= startDir )
+            if os.path.isdir( selDir ):
+                self.guiData.startDir2= [ os.path.dirname( selDir ) ]
+                self.guiData.save( "startDir2" )
+                
             fileNames= []
             for root, dirs, files in os.walk( selDir ):
                 for aFile in files:
                     tFile= os.path.join( root, aFile )
-                    if tFile.endswith( ".py" ):
+                    if self.diradd_le.text().strip() != "" and re.match( self.diradd_le.text().strip(), tFile ):
+                        fileNames.append( tFile )
+                    elif tFile.endswith( ".py" ):
                         fileNames.append( tFile )
         else:
+            startDir= self.guiData.startDir[0]
+            if not os.path.isdir( startDir ):
+                startDir= os.environ[ "HOME" ]
             fileNames= qfd.getOpenFileNames( caption= "select exe(s)", directory= startDir )
         
         if isinstance( fileNames, tuple ):
@@ -155,10 +185,11 @@ class boxWidget( QWidget, gUWidgetBase ):
         if len( fileNames ) == 0:
             return
         
-        modeDir= _getModeDir( fileNames )
-        if len( modeDir ) > 0:
-            self.guiData.startDir= [ modeDir ]
-            self.guiData.save( "startDir" )
+        if selDir is not None: # selected files not directories
+            modeDir= _getModeDir( fileNames )
+            if len( modeDir ) > 0:
+                self.guiData.startDir= [ modeDir ]
+                self.guiData.save( "startDir" )
         
         if len( fileNames ) == 0:
             return
@@ -168,10 +199,27 @@ class boxWidget( QWidget, gUWidgetBase ):
     def _setupLayout( self ):
         mainLayout= QGridLayout()
         
-        l1= QHBoxLayout()
-        l1.addWidget( self.fb )
-        l1.addWidget( self.fcb )
-        l1.addWidget( self.exeb )
+        topRow= QHBoxLayout()
+        
+        lgb2= QHBoxLayout()
+        lgb2.addWidget( self.xdat_le )
+        lgb2.addWidget( self.diradd_le )
+        qgb2= QGroupBox( "File Select" )
+        qgb2.setLayout( lgb2 )
+        topRow.addWidget( qgb2 )
+        
+        lgb2.addWidget( self.fb )
+        lgb2.addWidget( self.fcb )
+        
+        # XDATA
+        
+        lgb= QHBoxLayout()
+        lgb.addWidget( self.xdat_le )
+        qgb= QGroupBox( "xDataVar" )
+        qgb.setLayout( lgb )
+        topRow.addWidget( qgb )
+        
+        topRow.addWidget( self.exeb )
 #         layout.addWidget( l2, 0, 0 )
         
         l2= QGridLayout()
@@ -184,7 +232,7 @@ class boxWidget( QWidget, gUWidgetBase ):
         l2.addWidget( self.fsl1.clearButton, 2, 0 )
         l2.addWidget( self.fsl2.clearButton, 2, 1 )
     
-        mainLayout.addLayout( l1, 0, 0 )
+        mainLayout.addLayout( topRow, 0, 0 )
         mainLayout.addLayout( l2, 1, 0 )
         self.setLayout( mainLayout )
           
