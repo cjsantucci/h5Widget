@@ -5,9 +5,6 @@ Created on Sep 23, 2017
 '''
 
 import functools as ft
-from guiUtil.guidata import guiData
-from guiUtil.gUBase import gUWidgetBase
-from guiUtil.fileSelectListWidget import fileSelectList
 import numpy as np
 import os
 from PyQt5.Qt import *
@@ -15,6 +12,12 @@ import re
 import subprocess as subp
 from threading import Thread
 import traceback
+
+import guiUtil
+from guiUtil.guidata import guiData
+from guiUtil.gUBase import gUWidgetBase
+from guiUtil.fileSelectListWidget import fileSelectList
+from guiUtil.simpleDialogs import App
 
 class boxWidget( QWidget, gUWidgetBase ):
     '''
@@ -49,8 +52,8 @@ class boxWidget( QWidget, gUWidgetBase ):
     
     def _initGuiData( self, persistentDir= None, persistentFile= None, prefGroup= None, **kwargs ):
         
-        idd= { "startDir": [os.environ[ 'HOME' ]], \
-              "startDir2": [os.environ[ 'HOME' ]], \
+        idd= { "startDir": [ guiUtil.gUBase.home() ], \
+              "startDir2": [ guiUtil.gUBase.home() ], \
                "xDataVar": "MCLOCK", \
                "diraddRE": ".py$", \
                 }
@@ -90,42 +93,48 @@ class boxWidget( QWidget, gUWidgetBase ):
         
         self.exeb= QPushButton( "Execute" )
         self.exeb.clicked.connect( self._executeScripts )
+        self.saveListb= QPushButton( "Save List" )
+        self.saveListb.clicked.connect( self._saveList )
+        self.loadListb= QPushButton( "Load List" )
+        self.loadListb.clicked.connect( self._loadList )
+    
+    def _saveList( self, **kwargs ):
+        appObj= App( self, caseStr= "save", persistentDir= self.guiData.persistentDir, \
+             persistentFile= self.guiData.persistentFile, \
+             prefGroup= "/callWidget/saveList", window_title= "jpeExtend save",\
+             fileFilter= "Text Files (*.txt)"  )
+        
+        if appObj.saveFile is None:
+            return
+        
+        selectedTextList= [ self.fsl2.item( itemIdx ).text() for itemIdx in range( self.fsl2.count() ) ] 
+        with open( appObj.saveFile, 'w' ) as f:
+            [ f.write( aLine + "\n" ) for aLine in selectedTextList ]
+    
+    def _loadList( self ):
+        appObj= App( self, caseStr= "MULTI_OPEN", persistentDir= self.guiData.persistentDir, \
+             persistentFile= self.guiData.persistentFile, \
+             prefGroup= "/callWidget/multiOpenList", window_title= "jpeExtend load list",\
+             fileFilter= "Text Files (*.txt)"  )
+        
+        if appObj.selected_files is None:
+            return
+        
+        filesList= appObj.selected_files
+        
+        readFiles= []
+        for aFile in filesList:
+            with open( aFile, "r" ) as f:
+                lines= [ aLine.strip()  for aLine in f  if len(aLine.strip()) > 0 ]
+                
+            readFiles += [ aLine for aLine in lines if aLine not in readFiles ]
+         
+        self.fsl1._addListItems( readFiles )
+        self.fsl2._addListItems( readFiles )
     
     def _executeScripts( self, threads= False ):
-        rlb= self.fsl2
+        pass
         
-        selectedTextList= [ rlb.item( itemIdx ).text() \
-                      for itemIdx in range( rlb.count() ) 
-                      if rlb.item( itemIdx ).isSelected() ]
-        
-        passList= [ "-f", self.tmFile ]
-        if self.namedPipe is not None:
-            passList += [ "-p", self.namedPipe ]
-        
-        if self.xDataVar is not None:
-            passList += [ "--xDataVar", self.xDataVar ]
-        
-        sysCommands= []
-        threadCommands= []
-        for aScript in selectedTextList:
-            threadCommands.append( " ".join( passList ) )
-            sysCommands.append( aScript + " ".join( passList ) )
-        
-        for aScript, threadComm, sysComm,  in zip( *[ selectedTextList, threadCommands, sysComm ] ):
-            if threads and aScript.endswith( ".py" ):
-                try:
-                    t= Thread( target = scriptMain,
-                        args= ( sysComm ) )
-                    t.daemon= True
-                    t.start()
-                except:
-                    traceback.print_exc()
-            else:
-                try:
-                    proc= subp.Popen( sysComm )
-                except:
-                    traceback.print_exc()
-    
     def _push2Right( self ):
         llb= self.fsl1
         selectedTextList= [ llb.item( itemIdx ).text() \
@@ -154,7 +163,7 @@ class boxWidget( QWidget, gUWidgetBase ):
         if self.fcb.isChecked():
             startDir= self.guiData.startDir2[0]
             if not os.path.isdir( startDir ):
-                startDir= os.environ[ "HOME" ]
+                startDir= guiUtil.gUBase.home()
                 
             selDir= qfd.getExistingDirectory( caption= "select exe(s)", directory= startDir )
             if os.path.isdir( selDir ):
@@ -172,7 +181,7 @@ class boxWidget( QWidget, gUWidgetBase ):
         else:
             startDir= self.guiData.startDir[0]
             if not os.path.isdir( startDir ):
-                startDir= os.environ[ "HOME" ]
+                startDir= guiUtil.gUBase.home()
             fileNames= qfd.getOpenFileNames( caption= "select exe(s)", directory= startDir )
         
         if isinstance( fileNames, tuple ):
@@ -220,6 +229,8 @@ class boxWidget( QWidget, gUWidgetBase ):
         topRow.addWidget( qgb )
         
         topRow.addWidget( self.exeb )
+        topRow.addWidget( self.saveListb )
+        topRow.addWidget( self.loadListb )
 #         layout.addWidget( l2, 0, 0 )
         
         l2= QGridLayout()

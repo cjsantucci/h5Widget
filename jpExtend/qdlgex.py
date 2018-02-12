@@ -81,7 +81,7 @@ class h5dialog( QWidget, gUWidgetBase ):
 
         return sorted( defaultKeys ), sorted( strKeys )
 
-    def __init__( self, parent= None, **kwargs ):
+    def __init__( self, parent, **kwargs ):
         
         QWidget.__init__( self, parent )
         gUWidgetBase.__init__( self, **kwargs )
@@ -230,7 +230,10 @@ class h5dialog( QWidget, gUWidgetBase ):
              }
         
         try:
-            self.scObj= scroll_control( **inputdict )
+            self.scObj= scroll_control( persistentDir= self.guiData.persistentDir,\
+                                        persistentFile= self.guiData.persistentFile, \
+                                        prefGroup= "/process_scroll_control", \
+                                        **inputdict )
             
             if onStartup:
                 self.scObj.qcb.setEnabled( False )

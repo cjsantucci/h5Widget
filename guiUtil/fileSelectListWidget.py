@@ -31,8 +31,9 @@ class fileSelectList( QListWidget, gUWidgetBase ):
         if listRect is None:
             listRect= QRect( 50, 50, 300, 500 )
         self._setupLayout( listRect , clearButtonLoc= clearButtonLoc )
-
-        self._initGuiData( **kwargs )
+        
+        idd= { "fileList": [""] }
+        self._initGuiData( idd= idd, **kwargs )
         
         self._rememberOldList()
 
@@ -47,17 +48,6 @@ class fileSelectList( QListWidget, gUWidgetBase ):
             return
         
         self._addListItems( self.guiData.fileList )
-    
-    def _initGuiData( self, persistentDir= None, persistentFile= None, prefGroup= None, **kwargs ):
-        
-        idd= { "fileList": [""] }
-        
-        guiDataObj= guiData( persistentDir= persistentDir, \
-                               persistentFile= persistentFile, \
-                               prefGroup= prefGroup, \
-                               initDefaultDict= idd )
-        
-        self.guiData= guiDataObj
 
     def _addListItems( self, inStrList ):
         assert isinstance( inStrList, list ), "input must be list"

@@ -11,6 +11,7 @@ import sys
 
 sys.path.append("/home/chris/workspace/py3")
 
+import guiUtil
 from guiUtil.scroller import scroller
 from guiUtil import guidata as gdat
 from guiUtil.gUBase import gUWidgetBase, dictOverride
@@ -24,7 +25,11 @@ class scroll_control( QWidget, gUWidgetBase ):
     scroller= None
     guiData= None
 
-    def __init__( self, parent= None, **kwargs ):
+    def __init__( self, parent= None, \
+                  persistentDir= None, \
+                  persistentFile= None, \
+                  prefGroup= None, \
+                  **kwargs ):
         '''
         Constructor
         '''
@@ -38,19 +43,21 @@ class scroll_control( QWidget, gUWidgetBase ):
             }
         
         dictOverride( kwargs, idd, popOrig= True ) # override the defaults or saved values
+            
+        if not os.path.isdir( persistentDir ):
+            os.mkdir( persistentDir )
         
-        guiData= gdat.guiData( persistentDir= os.environ[ "HOME" ]+ "/.scroll_control", \
-                               persistentFile= 'jpePref.h5', \
-                               prefGroup= "/scroll_control", \
-                               initDefaultDict= idd )
-        
-        self.guiData= guiData
+        self._initGuiData( idd= idd, \
+                           persistentDir= persistentDir, \
+                           persistentFile= persistentFile, \
+                           prefGroup= prefGroup )
+
         """
         Do these
         # add load method to guidata?
         # the process command will be sent in, so how do we not double it here
         """ 
-        guiData.resetStoredDefaults()
+        self.guiData.resetStoredDefaults()
         self.scroller= scroller( pyqtSigFinished= self._procFinished, **kwargs, **self.guiData.defDict )
         self.qmw.setMinimumHeight( 500 )
         
