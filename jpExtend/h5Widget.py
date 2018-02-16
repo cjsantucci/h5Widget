@@ -20,7 +20,7 @@ class procWindow( QMainWindow ):
         else:
             event.ignore()
 
-class h5dialog( QWidget, gUWidgetBase ):
+class App( QWidget, gUWidgetBase ):
     """
     Gui interface to hdf5 converter.
     The utility to this could be argued to be limited
@@ -81,10 +81,15 @@ class h5dialog( QWidget, gUWidgetBase ):
 
         return sorted( defaultKeys ), sorted( strKeys )
 
-    def __init__( self, parent, **kwargs ):
+    def __init__( self, parent, \
+                  topWidget, \
+                  **kwargs ):
         
         QWidget.__init__( self, parent )
         gUWidgetBase.__init__( self, **kwargs )
+        
+        self.topWidget= topWidget
+        
         self._initGuiData( **kwargs )
         
         dlgwidth= 500
@@ -344,7 +349,7 @@ class h5dialog( QWidget, gUWidgetBase ):
             
 def main(): 
     app = QApplication( sys.argv )
-    ex = h5dialog( "~/.jpExtend" )
+    ex = App( "~/.jpExtend" )
     ex.show()
     sys.exit( app.exec_() )
     

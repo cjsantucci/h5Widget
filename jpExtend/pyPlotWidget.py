@@ -5,6 +5,7 @@ Created on Sep 23, 2017
 '''
 
 import functools as ft
+import importlib
 import numpy as np
 import os
 from PyQt5.Qt import *
@@ -14,27 +15,62 @@ from threading import Thread
 import traceback
 
 import guiUtil
+from guiUtil.fileSelect import fileSelectRemember
 from guiUtil.guidata import guiData
 from guiUtil.gUBase import gUWidgetBase
 from guiUtil.fileSelectListWidget import fileSelectList
-from guiUtil.simpleDialogs import App
+from guiUtil import simpleDialogs
 
-class boxWidget( QWidget, gUWidgetBase ):
+class mySlider( QSlider, gUWidgetBase ):
     '''
     classdocs
     '''
     def __init__( self, parent, \
+                  topWidget, \
+                  numFrames= 0, \
+                  **kwargs ):
+
+        QSlider.__init__( self, parent )
+        
+        gUWidgetBase.__init__( self, **kwargs )
+        self.topWidget= topWidget
+        self.setMinimum( 0 )
+        self.setMaximum( numFrames-1 )
+        self.setOrientation( Qt.Horizontal  )
+        self.valueChanged.connect( self.valuechanged )
+    
+    def valuechanged( self ):
+        self.topWidget.updateAll( self.value() )
+        
+        
+class App( QWidget, gUWidgetBase ):
+    '''
+    classdocs
+    '''
+    def __init__( self, parent, \
+                  topWidget, \
                   leftRect= None, leftClearButtonLoc= None, \
                   leftPrefGroup= None, \
                   rightRect= None, rightClearButtonLoc= None, \
                   rightPrefGroup= None, \
                   boxPrefGroup= None, \
+                  makeSlider= False, \
                   **kwargs ):
 
         QWidget.__init__( self, parent, **kwargs )
         gUWidgetBase.__init__( self, **kwargs )
 
-        self._initGuiData( prefGroup= boxPrefGroup, **kwargs )
+        self._slider= None
+        self.topWidget= topWidget
+
+        idd= { "startDir": [ guiUtil.gUBase.home() ], \
+          "startDir2": [ guiUtil.gUBase.home() ], \
+          "pyPlotStartDir": [ guiUtil.gUBase.home() ], \
+          "xDataVar": "MCLOCK", \
+          "diraddRE": ".py$", \
+        }
+
+        self._initGuiData( idd= idd, prefGroup= boxPrefGroup, **kwargs )
 
         self.fsl1    = fileSelectList( self, listRect= leftRect, \
                           clearButtonLoc= leftClearButtonLoc, \
@@ -48,22 +84,7 @@ class boxWidget( QWidget, gUWidgetBase ):
         
         self._createOtherWidgetMembers()
         
-        self._setupLayout()
-    
-    def _initGuiData( self, persistentDir= None, persistentFile= None, prefGroup= None, **kwargs ):
-        
-        idd= { "startDir": [ guiUtil.gUBase.home() ], \
-              "startDir2": [ guiUtil.gUBase.home() ], \
-               "xDataVar": "MCLOCK", \
-               "diraddRE": ".py$", \
-                }
-        
-        guiDataObj= guiData( persistentDir= persistentDir, \
-                               persistentFile= persistentFile, \
-                               prefGroup= prefGroup, \
-                               initDefaultDict= idd )
-        
-        self.guiData= guiDataObj
+        self._setupLayout( makeSlider )
         
     def _save_LE_Data( self, leObjStr, saveStr ):
         leObj= getattr( self, leObjStr )
@@ -99,7 +120,7 @@ class boxWidget( QWidget, gUWidgetBase ):
         self.loadListb.clicked.connect( self._loadList )
     
     def _saveList( self, **kwargs ):
-        appObj= App( self, caseStr= "save", persistentDir= self.guiData.persistentDir, \
+        appObj= simpleDialogs.App( self, caseStr= "save", persistentDir= self.guiData.persistentDir, \
              persistentFile= self.guiData.persistentFile, \
              prefGroup= "/callWidget/saveList", window_title= "jpeExtend save",\
              fileFilter= "Text Files (*.txt)"  )
@@ -112,10 +133,13 @@ class boxWidget( QWidget, gUWidgetBase ):
             [ f.write( aLine + "\n" ) for aLine in selectedTextList ]
     
     def _loadList( self ):
-        appObj= App( self, caseStr= "MULTI_OPEN", persistentDir= self.guiData.persistentDir, \
-             persistentFile= self.guiData.persistentFile, \
-             prefGroup= "/callWidget/multiOpenList", window_title= "jpeExtend load list",\
-             fileFilter= "Text Files (*.txt)"  )
+        appObj= simpleDialogs.App( self, \
+                     caseStr= "MULTI_OPEN", \
+                     persistentDir= self.guiData.persistentDir, \
+                     persistentFile= self.guiData.persistentFile, \
+                     prefGroup= "/pyPlotWidget/loadList", \
+                     window_title= "jpeExtend load list", \
+                     fileFilter= "Text Files (*.txt)" )
         
         if appObj.selected_files is None:
             return
@@ -133,7 +157,23 @@ class boxWidget( QWidget, gUWidgetBase ):
         self.fsl2._addListItems( readFiles )
     
     def _executeScripts( self, threads= False ):
-        pass
+        rlb= self.fsl2
+        selectedTextList= [ rlb.item( itemIdx ).text() \
+                              for itemIdx in range( rlb.count() ) 
+                              if rlb.item( itemIdx ).isSelected() ]
+        
+        if len( selectedTextList ) == 0:
+            return
+        
+        for aFile in selectedTextList:
+            dotFile= ".".join( aFile.split( "." )[:-1] )
+            modName= os.path.basename( dotFile )
+            modPath= os.path.dirname( dotFile )
+            dotFile= re.sub( os.path.sep, ".", modPath ).lstrip(".") 
+            dyn_mod= importlib.import_module( modName, dotFile )
+            mainMethod= getattr( dyn_mod, "main" )
+            dyn_mod.main([], block= False, show= True)
+        
         
     def _push2Right( self ):
         llb= self.fsl1
@@ -152,60 +192,30 @@ class boxWidget( QWidget, gUWidgetBase ):
         if len( selectedTextList ) == 0:
             return
         
+        self.fsl1._addListItems( selectedTextList )
+        
         self.fsl2._clearButtonPushed()
     
     def _fileSelect( self ):
-        qfd= QFileDialog()
-        qfd.setFileMode( QFileDialog.ExistingFiles )
-#         QAbstractItemView::MultiSelection
-        
-        selDir= None 
+        grabDirectory= self.fcb.isChecked()
         if self.fcb.isChecked():
-            startDir= self.guiData.startDir2[0]
-            if not os.path.isdir( startDir ):
-                startDir= guiUtil.gUBase.home()
-                
-            selDir= qfd.getExistingDirectory( caption= "select exe(s)", directory= startDir )
-            if os.path.isdir( selDir ):
-                self.guiData.startDir2= [ os.path.dirname( selDir ) ]
-                self.guiData.save( "startDir2" )
-                
-            fileNames= []
-            for root, dirs, files in os.walk( selDir ):
-                for aFile in files:
-                    tFile= os.path.join( root, aFile )
-                    if self.diradd_le.text().strip() != "" and re.match( self.diradd_le.text().strip(), tFile ):
-                        fileNames.append( tFile )
-                    elif tFile.endswith( ".py" ):
-                        fileNames.append( tFile )
+            startDirField= "startDir2"
         else:
-            startDir= self.guiData.startDir[0]
-            if not os.path.isdir( startDir ):
-                startDir= guiUtil.gUBase.home()
-            fileNames= qfd.getOpenFileNames( caption= "select exe(s)", directory= startDir )
+            startDirField= "startDir"
         
-        if isinstance( fileNames, tuple ):
-            fileTypeSelectedAllowed= fileNames[1]
-            fileNames= fileNames[0]
+        if self.diradd_le.text().strip() == "":
+            regex= "*.py"
+        else:
+            regex= self.diradd_le.text().strip()
+            
+        fileNames= fileSelectRemember( self.guiData, startDirField, grabDirectory, \
+                                       regex= regex, multipleFiles= True, \
+                                       caption= "select exe(s)" )
         
-        """ for now require that it ends in .py"""
-        fileNames= [ aFile for aFile in fileNames if aFile.endswith( ".py" ) ]
-        
-        if len( fileNames ) == 0:
-            return
-        
-        if selDir is not None: # selected files not directories
-            modeDir= _getModeDir( fileNames )
-            if len( modeDir ) > 0:
-                self.guiData.startDir= [ modeDir ]
-                self.guiData.save( "startDir" )
-        
-        if len( fileNames ) == 0:
-            return
-        
-        self.fsl1._addListItems( fileNames )
+        if fileNames is not None:
+            self.fsl1._addListItems( fileNames )
        
-    def _setupLayout( self ):
+    def _setupLayout( self, makeSlider ):
         mainLayout= QGridLayout()
         
         topRow= QHBoxLayout()
@@ -242,9 +252,19 @@ class boxWidget( QWidget, gUWidgetBase ):
         
         l2.addWidget( self.fsl1.clearButton, 2, 0 )
         l2.addWidget( self.fsl2.clearButton, 2, 1 )
-    
-        mainLayout.addLayout( topRow, 0, 0 )
-        mainLayout.addLayout( l2, 1, 0 )
+        
+        row= 0
+        if makeSlider:
+            sliderLayout= QHBoxLayout()
+            self._slider= mySlider( self, self.topWidget, \
+                                    numFrames= self.topWidget.tmObj.numFrames )
+            sliderLayout.addWidget( self._slider )
+            mainLayout.addLayout( sliderLayout, row, 0 )
+            row += 1
+        
+        mainLayout.addLayout( topRow, row, 0 )
+        row += 1
+        mainLayout.addLayout( l2, row, 0 )
         self.setLayout( mainLayout )
           
     def resetGuiDefaults( self ):
@@ -252,16 +272,3 @@ class boxWidget( QWidget, gUWidgetBase ):
         self.fsl1.resetGuiDefaults()
         self.fsl2.resetGuiDefaults()
         
-def _getModeDir( fileNames ):
-    unqDirNames= []
-    [ unqDirNames.append( os.path.dirname( aFile ) ) for aFile in fileNames if os.path.dirname( aFile ) not in unqDirNames ]
-    
-    countIdxList= [0]*len(unqDirNames)
-    for aFile in fileNames:
-        idx= unqDirNames.index( os.path.dirname( aFile ) )
-        countIdxList[ idx ] += 1
-    
-    modeDir= unqDirNames[ np.where( countIdxList == np.max(countIdxList) )[0][0] ]
-    
-    return modeDir
-    

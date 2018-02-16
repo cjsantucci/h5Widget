@@ -11,8 +11,10 @@ import guiUtil
  
 class App( QWidget , gUWidgetBase ):
  
-    def __init__( self, parent, caseStr= "open", fileFilter= "All Files (*)", \
-                  window_title= None, msg= None, **kwargs ):
+    def __init__( self, parent, caseStr= "open", \
+                  fileFilter= "All Files (*)", \
+                  window_title= None, \
+                  msg= None, **kwargs ):
         
         QWidget.__init__( self, parent )
         gUWidgetBase.__init__( self, **kwargs )

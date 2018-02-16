@@ -4,9 +4,12 @@ Created on Feb 4, 2017
 @author: chris
 '''
 
+import guiUtil
 import guiUtil.guidata as gdat
 import os
 from PyQt5.Qt import *
+import re
+import numpy as np
 
 class pb_combo_selector( object ):
     '''
@@ -174,5 +177,84 @@ class pb_combo_selector( object ):
         self.ComboBox.addItems( self.guiData.fileList )
 #             self.ComboBox.
     
+def fileSelectRemember( guiData, startDirField, \
+                        grabDirectory= False, \
+                        regex= "", \
+                        multipleFiles= True, \
+                        caption= "",\
+                        fileListFilter= "All Files (*)" ):
+    
+    qfd= QFileDialog()
+    if multipleFiles:
+        qfd.setFileMode( QFileDialog.ExistingFiles )
+#         QAbstractItemView::MultiSelection
+        qfd.setNameFilters( [ fileListFilter ] )
+    
+    selDir= None 
+    if grabDirectory:
+        startDir= getattr( guiData, startDirField )[0]
+        if not os.path.isdir( startDir ):
+            startDir= guiUtil.gUBase.home()
         
+        selDir= qfd.getExistingDirectory( caption= caption, directory= startDir )
+        if os.path.isdir( selDir ):
+            setattr( guiData, startDirField, [ os.path.dirname( selDir ) ] )
+            guiData.save( startDirField )
+            
+        fileNames= []
+        for root, dirs, files in os.walk( selDir ):
+            for aFile in files:
+                tFile= os.path.join( root, aFile )
+                if regex.strip() != "" and re.match( regex, tFile ):
+                    fileNames.append( tFile )
+                elif tFile.endswith( ".py" ):
+                    fileNames.append( tFile )
+    else:
+        startDir= getattr( guiData, startDirField )[0]
+
+        if not os.path.isdir( startDir ):
+            startDir= guiUtil.gUBase.home()
+        fileNames= qfd.getOpenFileNames( caption= "select exe(s)", directory= startDir )
+    
+    if isinstance( fileNames, tuple ):
+        fileTypeSelectedAllowed= fileNames[1]
+        fileNames= fileNames[0]
+    
+    else:
+        fileNames= [ aFile for aFile in fileNames 
+                    if aFile.endswith( ".py" ) or
+                    regex.strip() != "" and re.match( regex, aFile )
+                   ]
+    
+    if len( fileNames ) == 0:
+        return
+    
+    modeDir= _getModeDir( fileNames ) 
+    if len( modeDir ) > 0: 
+        setattr( guiData, startDirField , [ modeDir ] )
+        guiData.save( startDirField ) 
+    
+    if selDir is not None: # selected files not directories
+        modeDir= _getModeDir( fileNames )
+        if len( modeDir ) > 0:
+            setattr( guiData, startDirField, [ modeDir ] )
+            guiData.save( startDirField )
+    
+    if len( fileNames ) == 0:
+        return
+    
+    return fileNames
+    
+def _getModeDir( fileNames ):
+    unqDirNames= []
+    [ unqDirNames.append( os.path.dirname( aFile ) ) for aFile in fileNames if os.path.dirname( aFile ) not in unqDirNames ]
+    
+    countIdxList= [0]*len(unqDirNames)
+    for aFile in fileNames:
+        idx= unqDirNames.index( os.path.dirname( aFile ) )
+        countIdxList[ idx ] += 1
+    
+    modeDir= unqDirNames[ np.where( countIdxList == np.max(countIdxList) )[0][0] ]
+    
+    return modeDir        
         
