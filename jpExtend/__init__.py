@@ -4,6 +4,8 @@ import argparse
 import jpExtend
 import os, sys, tempfile
 
+frameLineColor= [0.8, 0.8, 0.8]
+
 def getTempFileName( name= "jpExtendFifo" ):
     tmpdir = tempfile.mkdtemp()
     filename = os.path.join( tmpdir, name )

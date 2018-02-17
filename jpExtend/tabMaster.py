@@ -4,11 +4,14 @@ from PyQt5.Qt import *
 import argparse as ap
 import functools as ft
 import getpass as gp
+import matplotlib.pyplot as plt
 import os
 from queue import Queue, Empty
 import signal
 import sys
+from threading import Lock
 from threading import Thread
+import warnings
 
 import guiUtil
 from guiUtil.fileSelect import fileSelectRemember
@@ -25,40 +28,63 @@ class dummyTM2Remove():
         self.numFrames= 25
         self.filename= tmFile
 
-class tabMaster( gUWidgetBase ):
+class myQmw( QMainWindow ):
+    
+    def __init__( self, mainProgram= None ):
+        QMainWindow.__init__( self )
+        self.mainProgram= mainProgram
+        
+    def closeEvent(self, *args, **kwargs):
+        self.mainProgram.closeEvent( *args, **kwargs )
+
+class myThread( Thread ):
+    def __init__( self, *args, **kwargs ):
+        Thread.__init__( self, *args, **kwargs )
+        self.stop= False
+
+class tabMaster( QObject, gUWidgetBase ):
     """
     Main constructor of all of the tabs
     """
+    _fifoUpdateSignal= pyqtSignal()
 
     def __init__( self, *args, tmFile= None, commandLineArgs= None, **kwargs ):
         
+        QObject.__init__( self )
         gUWidgetBase.__init__( self, **kwargs )
         
         self._fifoQ= Queue()
         self._tmObj= None
         
         self._verbose= commandLineArgs.verbose
+
+                
+        idd= { \
+          "fileOpenTm": [ guiUtil.gUBase.home() ], \
+        }
+        self._initGuiData( idd= idd, prefGroup= "/tabMaster", **kwargs )
+
         
         self._openFileSelect( tmFile= tmFile, startup= True )
             
         self._fifoFile= commandLineArgs.fifoFile
+        self._fifoLock= None
+        self._fifoReadThread= None
+
         if self._fifoFile is not None:
+            self._fifoUpdateSignal.connect( self.fifoThreadUpdate )
+            self._fifoLock= Lock()
+            
             self._kickOffReadThread()
-            makeSlider= False
+            makeSlider= True
         else:
             makeSlider= True
         
         width= 900
         height= 250
         
-        idd= { \
-          "fileOpenTm": [ guiUtil.gUBase.home() ], \
-        }
-
-        self._initGuiData( idd= idd, prefGroup= "/tabMaster", **kwargs )
-
-        
         tabs    = QTabWidget()
+        self.qmw.mainProgram= self
         self.tabs= tabs
         tabs.currentChanged.connect( self._onChange )
         self.qmw.setCentralWidget( tabs )
@@ -70,6 +96,7 @@ class tabMaster( gUWidgetBase ):
         
         if makeH5Tab():
             tab1    = h5App( tabs, self, **kwargs )
+            self.h5WidgetTab= tab1
             tabs.addTab( tab1, "h5Diaglog" )
         
         if makePlotTab():
@@ -83,6 +110,7 @@ class tabMaster( gUWidgetBase ):
                                  boxPrefGroup= "plt_tab/other", \
                                  makeSlider= makeSlider, \
                                  **kwargs )
+            self.plotterWidgetTab= tab2
             tabs.addTab( tab2, "plt_exe" )
 
         tab3    = QWidget()
@@ -135,6 +163,12 @@ class tabMaster( gUWidgetBase ):
             
             self.qmw.setMenuBar( menuBar )
     
+    def closeEvent( self, event ):
+        plt.close("all")
+        if self._fifoReadThread is not None:
+            self._fifoReadThread.stop= True
+        event.accept()
+    
     def _openFileSelect( self, tmFile= None, startup= False ):
         
         if tmFile is None:
@@ -175,46 +209,89 @@ class tabMaster( gUWidgetBase ):
             self._disconnectOldPlots()
     
     def updateAll( self, frame ):
-        pass
+        
+        self.plotterWidgetTab._pyPlotUpdater.updatePlots( \
+            frame, \
+            )
     
     def _disconnectOldPlots( self ):
         pass
+    
+    @pyqtSlot()
+    def fifoThreadUpdate( self ):
+        self._fifoLock.acquire()
         
+        if self._fifoQ.empty():
+            warnings.warn( "Don't think this should occur...")
+            self._fifoLock.release()
+            return
+        
+        frame= self._fifoQ.get(0)
+        self.plotterWidgetTab._slider.setValue( frame )
+        
+        if len( self.plotterWidgetTab._pyPlotUpdater ) == 0:
+            self._fifoLock.release()
+            return
+        
+        self.h5WidgetTab.setEnabled( False )
+        self.plotterWidgetTab.setEnabled( False )
+        self.plotterWidgetTab._slider.setEnabled( False )
+        
+        self.updateAll( frame )
+    
+        self.h5WidgetTab.setEnabled( True )
+        self.plotterWidgetTab.setEnabled( True )
+        self.plotterWidgetTab._slider.setEnabled( True )
+        self.plotterWidgetTab._slider.setEnabled( True )
+        
+        self._fifoLock.release()
+    
     def _kickOffReadThread( self ):
-        self._inUpdate= pyqtSignal()
-        self._updateFinished.connect( self.procFinished )
-        
-        thread= Thread( target = self._readThreadMethod,
-                args= ( self._fifoQ, self._fifoFile ) )
+
+        thread= myThread( target = self._readThreadMethod,
+                args= ( self._fifoFile, self._fifoQ, self._fifoLock, self._fifoUpdateSignal ) )
         
         thread.daemon = True                            # Daemonize thread
         thread.start() 
         self._fifoReadThread= thread
     
-    def _readThreadMethod( self, fifoFile, fifoQ, updateBroadCast, receiveSignal ):
-        print("pipe: " + fifoFile)
+    def _readThreadMethod( self, fifoFile, fifoQ, fifoLock, updateBroadCast ):
+#         print("pipe: " + fifoFile)
         try:
             with open( fifoFile, "r" ) as f:
-                while True:
-                    print("read")
+                while True and not self._fifoReadThread.stop:
+#                     print("read")
                     lines= f.read().split("\n")
                     lines.reverse()
-                    print( "lines: " + str(lines))
-                    for aLine in lines:
-                        if len( aLine ) != 0:
-                            mostRecentData= aLine
-                            with fifoQ.mutex:
-                                fifoQ.queue.clear()
-                                fifoQ.put( mostRecentData )
-                                self._inUpdate= True
-                                updateBroadCast.emit()
-                                
-                            break
-                    print("read Value: " + mostRecentData)
-                    print("read2")
+                    tokenList= [ aTok.strip().split()[0] for aLine in lines for aTok in aLine ]
+#                     print( "lines: " + str(lines))
+                    
+                    mostRecentData= None
+                    for aTok in tokenList:
+                        try:
+                            mostRecentData= int(aTok)
+                        except:
+                            pass
+                    
+#                     print("mostRecent on read: " + str(mostRecentData))
+                    if mostRecentData is None:
+                        continue
+                    
+#                     print("lock")
+                    fifoLock.acquire()
+                    fifoQ.put( mostRecentData )
+                    fifoLock.release()
+                    
+#                     print("emit")
+#                     print(type(updateBroadCast))
+                    updateBroadCast.emit()
+
+#                     print("read Value: " + str(mostRecentData))
+#                     print("read2")
+                    
         except Exception as e:
             print("read side exception")
-            print(e)
+            print("Exception e: " + e)
     
     def getTmObj( self ):
         return self._tmObj
@@ -244,23 +321,20 @@ def init( persistenDir ):
 # end init 
 
 def parseArgs( argv ):
-    
     parserObj= ap.ArgumentParser()
     parserObj.add_argument("--fifoFile", default= None, type= str, help= "name of FIFO to communicate TO parent.")
     parserObj.add_argument("--tmFile", default= None, type= str, help= "tm or h5 file.")
     parserObj.add_argument("--verbose", default= 0, type= int, help= "increase command line output text" )
-    args= parserObj.parse_args()
+    args= parserObj.parse_args( argv )
     
     return args
     
 def main( argv ):
-    argv.append( "--tmFile")
-    argv.append( "/home/chris/0001.tm")
     
     clArgs= parseArgs( argv[1:] )
     qapp     = QApplication( argv )
 #         app.setStyle(QStyleFactory.create("Plastique"))
-    qmw     = QMainWindow()
+    qmw     = myQmw()
     qmw.setWindowTitle( "Python h5 Plotter" )
     
     pDir= init( ".jpExtend" )

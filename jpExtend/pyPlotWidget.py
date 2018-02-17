@@ -6,20 +6,44 @@ Created on Sep 23, 2017
 
 import functools as ft
 import importlib
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 from PyQt5.Qt import *
 import re
 import subprocess as subp
+import threading
 from threading import Thread
 import traceback
+import warnings
 
 import guiUtil
 from guiUtil.fileSelect import fileSelectRemember
 from guiUtil.guidata import guiData
 from guiUtil.gUBase import gUWidgetBase
 from guiUtil.fileSelectListWidget import fileSelectList
+from jpExtend.plotUpdater import plotUpdater
 from guiUtil import simpleDialogs
+
+class myFrameEdit( QLineEdit, gUWidgetBase ):
+    def __init__( self, parent, \
+              topWidget, \
+              numFrames= 0, \
+              **kwargs ):
+        
+        QLineEdit.__init__( self, parent )
+        gUWidgetBase.__init__( self, **kwargs )
+        self.topWidget= topWidget
+        self.numFrames= numFrames
+        
+#     def textChanged( self, *args, **kwargs ):
+#         print(self.text().strip())
+#         if int( self.text().strip() ) > self.numFrames:
+#             self.setText( str( self.numFrames ) )
+#         if int( self.text().strip() ) < 0:
+#             self.setText( str( 0 ) )
+#         
+#         self.parent()._slider
 
 class mySlider( QSlider, gUWidgetBase ):
     '''
@@ -38,11 +62,22 @@ class mySlider( QSlider, gUWidgetBase ):
         self.setMaximum( numFrames-1 )
         self.setOrientation( Qt.Horizontal  )
         self.valueChanged.connect( self.valuechanged )
-    
+        
     def valuechanged( self ):
+        val= int( self.value() )
+        textVal= int( self.parent()._frameLineEdit.text().strip() )
+        
+        if val != textVal:
+            self.parent()._frameLineEdit.setText( str(self.value()) )
+            
         self.topWidget.updateAll( self.value() )
-        
-        
+
+class plotUpdaterPyplot( gUWidgetBase, plotUpdater ):
+    def __init__( self, topWidget, **kwargs ):       
+        gUWidgetBase.__init__( self, **kwargs )
+        plotUpdater.__init__( self, **kwargs )
+        self.topWidget= topWidget
+
 class App( QWidget, gUWidgetBase ):
     '''
     classdocs
@@ -60,6 +95,8 @@ class App( QWidget, gUWidgetBase ):
         QWidget.__init__( self, parent, **kwargs )
         gUWidgetBase.__init__( self, **kwargs )
 
+        self._pyPlotUpdater= plotUpdaterPyplot( topWidget, **kwargs )
+        
         self._slider= None
         self.topWidget= topWidget
 
@@ -85,7 +122,10 @@ class App( QWidget, gUWidgetBase ):
         self._createOtherWidgetMembers()
         
         self._setupLayout( makeSlider )
-        
+    
+    def closeEvent( self, *args, **kwargs ):
+        pass
+       
     def _save_LE_Data( self, leObjStr, saveStr ):
         leObj= getattr( self, leObjStr )
         
@@ -157,6 +197,7 @@ class App( QWidget, gUWidgetBase ):
         self.fsl2._addListItems( readFiles )
     
     def _executeScripts( self, threads= False ):
+        plt.ion()
         rlb= self.fsl2
         selectedTextList= [ rlb.item( itemIdx ).text() \
                               for itemIdx in range( rlb.count() ) 
@@ -165,16 +206,29 @@ class App( QWidget, gUWidgetBase ):
         if len( selectedTextList ) == 0:
             return
         
+        preLenOfUpdates= len( self._pyPlotUpdater._updateList )
         for aFile in selectedTextList:
-            dotFile= ".".join( aFile.split( "." )[:-1] )
-            modName= os.path.basename( dotFile )
-            modPath= os.path.dirname( dotFile )
-            dotFile= re.sub( os.path.sep, ".", modPath ).lstrip(".") 
-            dyn_mod= importlib.import_module( modName, dotFile )
-            mainMethod= getattr( dyn_mod, "main" )
-            dyn_mod.main([], block= False, show= True)
-        
-        
+            try:
+                dotFile= ".".join( aFile.split( "." )[:-1] )
+                modName= os.path.basename( dotFile )
+                modPath= os.path.dirname( dotFile )
+                dotFile= re.sub( os.path.sep, ".", modPath ).lstrip(".") 
+                dyn_mod= importlib.import_module( modName, dotFile )
+                mainMethod= getattr( dyn_mod, "main" )
+                mainMethod( self.topWidget.tmObj, \
+                           block= False, \
+                           show= True, \
+                           jpEObj= self._pyPlotUpdater, \
+                           xDataVar= self.xdat_le.text().strip() )
+                
+                self._pyPlotUpdater.updatePlots( \
+                                                 self._slider.value(), \
+                                                 putInBack= True, \
+                                                 startIndex= preLenOfUpdates )
+            except:
+                traceback.print_exc()
+                warnings.warn( "Plot didn't work: " + aFile )
+             
     def _push2Right( self ):
         llb= self.fsl1
         selectedTextList= [ llb.item( itemIdx ).text() \
@@ -259,6 +313,15 @@ class App( QWidget, gUWidgetBase ):
             self._slider= mySlider( self, self.topWidget, \
                                     numFrames= self.topWidget.tmObj.numFrames )
             sliderLayout.addWidget( self._slider )
+            
+            self._frameLineEdit= myFrameEdit( self, self.topWidget, \
+                                             numFrames= self.topWidget.tmObj.numFrames )
+            self._frameLineEdit.setText( str(0) )
+            self._frameLineEdit.setMaximumHeight(30)
+            self._frameLineEdit.setMaximumWidth(50)
+            self._frameLineEdit.textChanged.connect( self.frameTextChanged )
+            sliderLayout.addWidget( self._frameLineEdit )
+            
             mainLayout.addLayout( sliderLayout, row, 0 )
             row += 1
         
@@ -266,7 +329,27 @@ class App( QWidget, gUWidgetBase ):
         row += 1
         mainLayout.addLayout( l2, row, 0 )
         self.setLayout( mainLayout )
-          
+        
+    def frameTextChanged( self ):
+        try:
+            le= self._frameLineEdit
+            slider= self._slider
+            
+            val= int( le.text().strip() )
+            if val < 0:
+                val= 0
+            if val >= le.numFrames:
+                val= le.numFrames-1
+            
+            sliderVal= int( slider.value() )
+            
+            if val != sliderVal:
+                """ slider does the update """
+                slider.setValue( val )
+                
+        except:
+            pass
+        
     def resetGuiDefaults( self ):
         self.guiData.resetStoredDefaults()
         self.fsl1.resetGuiDefaults()
