@@ -7,6 +7,7 @@ import functools as ft
 import inspect
 from matplotlib import pyplot as plt
 import numpy as np
+import warnings
 
 from guiUtil.gUBase import gUWidgetBase
 from bokeh.core.tests.test_query import plot
@@ -14,14 +15,19 @@ import jpExtend
 
 class updateListElement( object ):
     
-    def __init__( self, ax= None, xAlign= None, updateMethod= None ):
+    def __init__( self, ax= None, \
+                  xAlign= None, \
+                  updateMethod= None, \
+                  name= None ):
         self._ax= ax
         self._xAlign= xAlign
         self._updateMethod= updateMethod
         self._updateObj= None
+        self._name= None
         self.register( ax= ax, \
                        xAlign= xAlign, \
-                       updateMethod= updateMethod )
+                       updateMethod= updateMethod,\
+                       name= None )
 
             
     def _getAx( self ):
@@ -30,7 +36,14 @@ class updateListElement( object ):
     def _setAx( self, inAx ):
         assert isinstance( inAx, plt.Axes )
         self._ax= inAx
-
+    
+    def _get_name( self ):
+        return self._name
+    
+    def _set_name( self, inName ):
+        assert isinstance( inName, str )
+        self._name= inName
+    
     def _get_xAlign( self ):
         return self._xAlign
     
@@ -93,6 +106,7 @@ class updateListElement( object ):
     updateMethod= property( _get_updateMethod, _set_updateMethod )
     ax= property( _getAx, _setAx )
     xAlign= property( _get_xAlign, _set_xAlign )
+    name= property( _get_name, _set_name )
 
 class plotUpdater( object ):
     
@@ -107,13 +121,21 @@ class plotUpdater( object ):
         popIdxs= []
         for idx, anUpdate in enumerate( self._updateList ):
             if idx >= startIndex:
-                if anUpdate.ax is None or \
-                    not plt.fignum_exists( anUpdate.ax.figure.number ):
-                    
-                    popIdxs.append(idx)
-                    
-                else:
-                    anUpdate.update( frame, putInBack= putInBack )
+                
+                try:
+                    if anUpdate.ax is None or \
+                        not plt.fignum_exists( anUpdate.ax.figure.number ):
+                        
+                        popIdxs.append(idx)
+                        
+                    else:
+                        anUpdate.update( frame, putInBack= putInBack )
+                except:
+                    popIdxs.append( idx )
+                    nameStr= ""
+                    if hasattr( anUpdate, "name" ):
+                        nameStr= str( getattr( anUpdate, "name" ) )
+                    warnings.warn( "update failed: " + nameStr )
         
         if len( popIdxs ) > 0:
             popIdxs.reverse()
