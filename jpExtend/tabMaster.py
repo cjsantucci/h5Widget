@@ -5,7 +5,6 @@ import jpExtend
 import matplotlib
 matplotlib.use( jpExtend.matploblib_backend )
 import matplotlib.pyplot as plt
-plt.ion()
 import argparse as ap
 import functools as ft
 import getpass as gp

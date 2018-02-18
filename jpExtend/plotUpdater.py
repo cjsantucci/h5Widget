@@ -229,9 +229,8 @@ class plotUpdater( object ):
                 traceback.print_exc()
                 warnings.warn( "Plot didn't work: " + aFile )
         
-#         if not self.multproc:
-                        
-        plt.show( block= False )
+        if not self.multproc:
+            plt.show( block= False )
         if debugPrints:
             print("out of execute")
     
@@ -297,12 +296,17 @@ def multiprocessRunner( \
     pObj.executePlots( fileList, mainMethodsList, tmObj, frame, **kwargs )
                     
     if pObj.multproc:
-        pObj.mpUpdateLoop()
+        pass
+#         pObj.mpUpdateLoop()
         
 def plotDeco( inFunc ):
     func2run= inFunc
     
     def extraFUNCTIONality( *args, jpEObj= None, **kwargs ):
+        if isinstance( args[0], str ):
+            if args[0].endswith(".h5"):
+                pass #load tm here
+        
         extraFUNCTIONality.jpEObj= jpEObj
         if jpEObj is None:
             extraFUNCTIONality.register= register

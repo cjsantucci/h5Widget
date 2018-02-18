@@ -122,6 +122,7 @@ class App( QWidget, gUWidgetBase ):
         self._pyPlotUpdater= plotUpdaterPyplot( topWidget, **kwargs )
         self._multiProcRunningList= []
         self._allMultiProcRunningList= []
+        self._popenList= []
         
         self._slider= None
         self.topWidget= topWidget
@@ -201,6 +202,12 @@ class App( QWidget, gUWidgetBase ):
         """
         do all these things when close is clicked on the main window
         """
+        for aProc in self._popenList:
+            try:
+                aProc.terminate()
+            except:
+                pass
+        
         if len( self._allMultiProcRunningList ) == 0:
             return 
         
@@ -246,6 +253,9 @@ class App( QWidget, gUWidgetBase ):
         self.distb= QPushButton( "Distribute" )
         self.distb.clicked.connect( ft.partial( self._executeScripts, multiprocess= True ) )
         self.distb.setEnabled( False )
+        
+        self.popenb= QPushButton( "POpen" )
+        self.popenb.clicked.connect( ft.partial( self._executeScripts, popen= True ) )
         
         self.saveListb= QPushButton( "Save List" )
         self.saveListb.clicked.connect( self._saveList )
@@ -295,13 +305,34 @@ class App( QWidget, gUWidgetBase ):
         self.fsl1._addListItems( readFiles )
         self.fsl2._addListItems( readFiles )
     
-    def _executeScripts( self, multiprocess= False ):
+    def _doPOpen( self, fileList ):
+#         if not self.tmObj.filename.endswith( ".h5" ):
+#             QMessageBox.critical( self.tabs, "Message" , "could not do tm system call only supports h5 currently: " + self.tmObj.filename )
+#             return 
+        
+        for aFile in fileList:
+            try:
+                proc= subp.Popen( [ aFile, self.topWidget.tmObj.filename ], \
+                                  stdout= subp.PIPE, stderr= subp.PIPE )
+#                 stdout, stderr= proc.communicate()
+#                 print(stdout)
+                self._popenList.append( proc )
+            except:
+                traceback.print_exc()
+                pass
+                
+    
+    def _executeScripts( self, popen= False, multiprocess= False ):
         rlb= self.fsl2
         selectedTextList= [ rlb.item( itemIdx ).text() \
                               for itemIdx in range( rlb.count() ) 
                               if rlb.item( itemIdx ).isSelected() ]
         
         if len( selectedTextList ) == 0:
+            return
+        
+        if popen:
+            self._doPOpen( selectedTextList )
             return
         
         fileList, mainMethods= jpExtend.plotUpdater.getMains( selectedTextList )
@@ -342,7 +373,7 @@ class App( QWidget, gUWidgetBase ):
         self.setEnabled( True )
         self.topWidget.enableMenus()
     
-        print("done execute")
+#         print("done execute")
     
     def _push2Right( self ):
         """
@@ -428,6 +459,7 @@ class App( QWidget, gUWidgetBase ):
         twoButtonLayout= QVBoxLayout()
         twoButtonLayout.addWidget( self.exeb )
         twoButtonLayout.addWidget( self.distb )
+        twoButtonLayout.addWidget( self.popenb )
         topRow.addLayout( twoButtonLayout )
         
         twoButtonLayout= QVBoxLayout()
