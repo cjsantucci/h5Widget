@@ -310,16 +310,25 @@ class App( QWidget, gUWidgetBase ):
 #             QMessageBox.critical( self.tabs, "Message" , "could not do tm system call only supports h5 currently: " + self.tmObj.filename )
 #             return 
         
-        for aFile in fileList:
-            try:
-                proc= subp.Popen( [ aFile, self.topWidget.tmObj.filename ], \
-                                  stdout= subp.PIPE, stderr= subp.PIPE )
-#                 stdout, stderr= proc.communicate()
-#                 print(stdout)
-                self._popenList.append( proc )
-            except:
-                traceback.print_exc()
-                pass
+#         for aFile in fileList:
+        try:
+#                 proc= subp.Popen( [ aFile, self.topWidget.tmObj.filename ], \
+#                                   stdout= subp.PIPE, stderr= subp.PIPE )
+                #             try:
+
+            proc= subp.Popen( [ jpExtend.plotUpdater.__file__, \
+                                "--files", ",".join(fileList), \
+                                "--tmFile", self.topWidget.tmObj.filename,\
+                                "--xDataVar", self.xdat_le.text().strip() ], \
+                            stdout= subp.PIPE, stderr= subp.PIPE )
+
+#             stdout, stderr= proc.communicate()
+#             print(stdouzt)
+#             print(stderr)
+            self._popenList.append( proc )
+        except:
+            traceback.print_exc()
+            pass
                 
     
     def _executeScripts( self, popen= False, multiprocess= False ):

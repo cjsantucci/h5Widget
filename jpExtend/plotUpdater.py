@@ -1,8 +1,5 @@
-'''
-Created on Feb 16, 2018
-
-@author: chris
-'''
+#!/usr/local/bin/anaconda3/bin/python
+import argparse as ap
 import functools as ft
 import importlib
 import inspect
@@ -194,7 +191,7 @@ class plotUpdater( object ):
             popIdxs.reverse()
             [ self._updateList.pop( idx ) for idx in popIdxs ]
     
-    def executePlots( self, fileList, mainMethodsList,  tmObj, frame, xDataVar= None, **kwargs ):
+    def executePlots( self, fileList, mainMethodsList,  tmObj, frame= None, xDataVar= None, **kwargs ):
         """
         execute all selected files
         """
@@ -218,13 +215,14 @@ class plotUpdater( object ):
                 
                 if debugPrints:
                     print("main run for: " + aFile)
-                    
-                self.updatePlots( \
-                                 frame, \
-                                 putInBack= True, \
-                                 startIndex= preLenOfUpdates 
-                               )
                 
+                if frame is not None:
+                    self.updatePlots( \
+                                     frame, \
+                                     putInBack= True, \
+                                     startIndex= preLenOfUpdates 
+                                   )
+                    
             except:
                 traceback.print_exc()
                 warnings.warn( "Plot didn't work: " + aFile )
@@ -336,15 +334,45 @@ def getMains( inList ):
             modName= os.path.basename( dotFile )
             modPath= os.path.dirname( dotFile )
             dotFile= re.sub( os.path.sep, ".", modPath ).lstrip(".") 
+#             print(dotFile)
+#             print(modName)
             dyn_mod= importlib.import_module( modName, dotFile )
+#             print(dyn_mod)
             mainMethod= getattr( dyn_mod, "main" )
             outFiles.append( aFile )
             outMains.append( mainMethod )
         except:
+            print("Dynamic Module: " + dyn_mod)
             traceback.print_exc()
             warnings.warn( "Couldn't import main " + aFile )
     
     return outFiles, outMains
-            
+
+def main( argv, **kwargs ):
+    args= parseArgs( argv )
+    fileList= args.files.split(",")
+    fileList = [ aFile.strip() for aFile in fileList ]
+    fileList, mainMethodsList= getMains( fileList )
+    if len( fileList ) == 0:
+        return
+    tmObj= args.tmFile #update here
+    pObj= plotUpdater( **kwargs )
+    pObj.executePlots( fileList, mainMethodsList, tmObj, xDataVar= args.xDataVar, **kwargs )
+    plt.show()
+    
+def parseArgs( argv ):
+    """
+    support calls from popen
+    """
+    print(argv)
+    parserObj= ap.ArgumentParser()
+    parserObj.add_argument("--files", default= None, type= str, help= "name of FIFO to communicate TO parent.")
+    parserObj.add_argument("--tmFile", default= None, type= str, help= "tm or h5 file.")
+    parserObj.add_argument("--xDataVar", default= None, type= str, help= "tm or h5 file.")
+    parserObj.add_argument("--verbose", default= 0, type= int, help= "increase command line output text" )
+    args= parserObj.parse_args( argv[1:] )
+    
+    return args
+
 if __name__ == '__main__':
-    pass
+    main( sys.argv )
