@@ -14,10 +14,17 @@ class App( QWidget , gUWidgetBase ):
     def __init__( self, parent, caseStr= "open", \
                   fileFilter= "All Files (*)", \
                   window_title= None, \
+                  inWarning= True, \
+                  inCritical= False, \
+                  information= False, \
                   msg= None, **kwargs ):
         
         QWidget.__init__( self, parent )
         gUWidgetBase.__init__( self, **kwargs )
+        
+        self.msgBoxWarning= inWarning
+        self.msgBoxCritical= inCritical
+        self.msgBoxInfo= information
         
         self.fileFilter= fileFilter
         self.msgbox_selection= None
@@ -42,7 +49,7 @@ class App( QWidget , gUWidgetBase ):
         self._initUI( msg= msg, **kwargs )
     
     def _setCaseStr( self, caseStr ):
-        allowedCases= [ "multi_open", "open", "save", "msgbox" ]
+        allowedCases= [ "multi_open", "open", "save", "qbox", "msgbox" ]
         self.case= None
         for aCase in allowedCases:
             if caseStr.upper() == aCase.upper():
@@ -72,7 +79,10 @@ class App( QWidget , gUWidgetBase ):
             
             self._saveFileDialog()
         
-        elif self.case == "MSGBOX":
+        elif self.case == "QBOX":
+            self._QBox( msg= msg )
+            
+        elif self.case == "msgbox":
             self._msgBox( msg= msg )
  
     def _openFileNameDialog( self ):    
@@ -108,7 +118,7 @@ class App( QWidget , gUWidgetBase ):
             self.guiData.directory= [ dirName ]
             self.guiData.save( "directory" )
 
-    def _msgBox( self, msg ):
+    def _QBox( self, msg ):
     
         reply = QMessageBox.question(self, 'Message', 
                          msg, QMessageBox.Yes, QMessageBox.No)
@@ -118,6 +128,15 @@ class App( QWidget , gUWidgetBase ):
         else:
             self.msgbox_selection= False
     
+    def _msgBox( self, msg ):
+        
+        if self.msgBoxWarning:
+            qmb= QMessageBox.warning( self, "Message" , msg )
+        elif self.msgBoxCritical:
+            qmb= QMessageBox.critical( self, "Message" , msg )
+        elif self.msgBoxInfo:
+            qmb= QMessageBox.information( self, "Message" , msg )
+            
     def _saveFileDialog( self ):    
         options= QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog

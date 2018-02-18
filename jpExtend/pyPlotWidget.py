@@ -7,6 +7,7 @@ Created on Sep 23, 2017
 import functools as ft
 import importlib
 import matplotlib.pyplot as plt
+import multiprocessing
 import numpy as np
 import os
 from PyQt5.Qt import *
@@ -22,10 +23,14 @@ from guiUtil.fileSelect import fileSelectRemember
 from guiUtil.guidata import guiData
 from guiUtil.gUBase import gUWidgetBase
 from guiUtil.fileSelectListWidget import fileSelectList
-from jpExtend.plotUpdater import plotUpdater
 from guiUtil import simpleDialogs
+import jpExtend
+from jpExtend.plotUpdater import plotUpdater
 
 class myFrameEdit( QLineEdit, gUWidgetBase ):
+    """
+    frame edit text box
+    """
     def __init__( self, parent, \
               topWidget, \
               numFrames= 0, \
@@ -36,18 +41,33 @@ class myFrameEdit( QLineEdit, gUWidgetBase ):
         self.topWidget= topWidget
         self.numFrames= numFrames
         
-#     def textChanged( self, *args, **kwargs ):
-#         print(self.text().strip())
-#         if int( self.text().strip() ) > self.numFrames:
-#             self.setText( str( self.numFrames ) )
-#         if int( self.text().strip() ) < 0:
-#             self.setText( str( 0 ) )
-#         
-#         self.parent()._slider
+        self.textChanged.connect( self._frameTextChanged )
+        
+    def _frameTextChanged( self, *args, **kwargs ):
+        """
+        method when frame gets changed in text box
+        """
+        try:
+            slider= self.parent()._slider
+            
+            val= int( self.text().strip() )
+            if val < 0:
+                val= 0
+            if val >= self.numFrames:
+                val= self.numFrames-1
+            
+            sliderVal= int( slider.value() )
+            
+            if val != sliderVal:
+                """ slider does the update """
+                slider.setValue( val )
+                
+        except:
+            pass    
 
 class mySlider( QSlider, gUWidgetBase ):
     '''
-    classdocs
+    slider to control/parrot external caller frame
     '''
     def __init__( self, parent, \
                   topWidget, \
@@ -59,7 +79,10 @@ class mySlider( QSlider, gUWidgetBase ):
         gUWidgetBase.__init__( self, **kwargs )
         self.topWidget= topWidget
         self.setMinimum( 0 )
-        self.setMaximum( numFrames-1 )
+        if numFrames == 0:
+            self.setMaximum( numFrames )
+        else:
+            self.setMaximum( numFrames-1 )
         self.setOrientation( Qt.Horizontal  )
         self.valueChanged.connect( self.valuechanged )
         
@@ -70,18 +93,19 @@ class mySlider( QSlider, gUWidgetBase ):
         if val != textVal:
             self.parent()._frameLineEdit.setText( str(self.value()) )
             
-        self.topWidget.updateAll( self.value() )
+        self.topWidget._updateAll( self.value() )
 
 class plotUpdaterPyplot( gUWidgetBase, plotUpdater ):
+    
     def __init__( self, topWidget, **kwargs ):       
-        gUWidgetBase.__init__( self, **kwargs )
+#         gUWidgetBase.__init__( self, **kwargs )
         plotUpdater.__init__( self, **kwargs )
         self.topWidget= topWidget
 
 class App( QWidget, gUWidgetBase ):
-    '''
-    classdocs
-    '''
+    """
+    main plotter widget
+    """
     def __init__( self, parent, \
                   topWidget, \
                   leftRect= None, leftClearButtonLoc= None, \
@@ -96,6 +120,8 @@ class App( QWidget, gUWidgetBase ):
         gUWidgetBase.__init__( self, **kwargs )
 
         self._pyPlotUpdater= plotUpdaterPyplot( topWidget, **kwargs )
+        self._multiProcRunningList= []
+        self._allMultiProcRunningList= []
         
         self._slider= None
         self.topWidget= topWidget
@@ -123,10 +149,72 @@ class App( QWidget, gUWidgetBase ):
         
         self._setupLayout( makeSlider )
     
+    def _updateAll( self, frame ):
+        self._pyPlotUpdater.updatePlots( frame )
+        self._updateMultiProc( frame )
+    
+    def _updateMultiProc( self, frame ):
+        """
+        right now this is dormant due to both backends being whack.
+        """
+        if len( self._multiProcRunningList ) == 0:
+            return
+        
+        propPopIdxs= []
+        idx= 0
+        for anElement in self._multiProcRunningList:
+            mProc= anElement[0]
+            q= anElement[1]
+            idx += 1
+            if mProc.is_alive():
+                try:
+#                     if not q.empty():
+#                         q.clear()
+                    q.put( frame )
+                except:
+                    traceback.print_exc()
+                    try:
+                        propPopIdxs.append( idx )
+                    except:
+                        pass
+            else:
+                try:
+                    propPopIdxs.append( idx )
+                except:
+                    pass
+                
+        propPopIdxs.reverse() 
+        
+        if len( propPopIdxs ) > 0:
+            for idx in propPopIdxs:
+                self._multiProcRunningList.pop( idx )
+    
+    
+    def _disconnectOldPlots( self ):
+        """
+        so the old plots will not update
+        """
+        self._pyPlotUpdater.disconnect()
+        self._multiProcRunningList= []
+    
     def closeEvent( self, *args, **kwargs ):
-        pass
+        """
+        do all these things when close is clicked on the main window
+        """
+        if len( self._allMultiProcRunningList ) == 0:
+            return 
+        
+        for anElement in self._allMultiProcRunningList:
+            mProc= anElement[0]
+            try:
+                mProc.terminate()
+            except:
+                pass
        
     def _save_LE_Data( self, leObjStr, saveStr ):
+        """
+        save the data in the list boxes to persistent data
+        """
         leObj= getattr( self, leObjStr )
         
         leObj.setText( leObj.text().strip() )
@@ -154,12 +242,20 @@ class App( QWidget, gUWidgetBase ):
         
         self.exeb= QPushButton( "Execute" )
         self.exeb.clicked.connect( self._executeScripts )
+        
+        self.distb= QPushButton( "Distribute" )
+        self.distb.clicked.connect( ft.partial( self._executeScripts, multiprocess= True ) )
+        self.distb.setEnabled( False )
+        
         self.saveListb= QPushButton( "Save List" )
         self.saveListb.clicked.connect( self._saveList )
         self.loadListb= QPushButton( "Load List" )
         self.loadListb.clicked.connect( self._loadList )
     
     def _saveList( self, **kwargs ):
+        """
+        save list of .py files in the right text box as a text file
+        """
         appObj= simpleDialogs.App( self, caseStr= "save", persistentDir= self.guiData.persistentDir, \
              persistentFile= self.guiData.persistentFile, \
              prefGroup= "/callWidget/saveList", window_title= "jpeExtend save",\
@@ -173,6 +269,9 @@ class App( QWidget, gUWidgetBase ):
             [ f.write( aLine + "\n" ) for aLine in selectedTextList ]
     
     def _loadList( self ):
+        """
+        load a list of .py files saved in a text file into text box
+        """
         appObj= simpleDialogs.App( self, \
                      caseStr= "MULTI_OPEN", \
                      persistentDir= self.guiData.persistentDir, \
@@ -196,8 +295,7 @@ class App( QWidget, gUWidgetBase ):
         self.fsl1._addListItems( readFiles )
         self.fsl2._addListItems( readFiles )
     
-    def _executeScripts( self, threads= False ):
-        plt.ion()
+    def _executeScripts( self, multiprocess= False ):
         rlb= self.fsl2
         selectedTextList= [ rlb.item( itemIdx ).text() \
                               for itemIdx in range( rlb.count() ) 
@@ -206,30 +304,50 @@ class App( QWidget, gUWidgetBase ):
         if len( selectedTextList ) == 0:
             return
         
-        preLenOfUpdates= len( self._pyPlotUpdater._updateList )
-        for aFile in selectedTextList:
+        fileList, mainMethods= jpExtend.plotUpdater.getMains( selectedTextList )
+        
+        self.setEnabled( False )
+        self.topWidget.enableMenus( False )
+        
+        xDataVar= self.xdat_le.text().strip()
+        passArgs= ( fileList, mainMethods, self.topWidget.tmObj, self._slider.value() )
+        if not multiprocess:
+            self._pyPlotUpdater.executePlots( \
+                                              *passArgs, \
+                                              xDataVar= xDataVar, \
+                                            )
+        else:
+            """
+            this is really not working currently because of the backend issues
+            """
             try:
-                dotFile= ".".join( aFile.split( "." )[:-1] )
-                modName= os.path.basename( dotFile )
-                modPath= os.path.dirname( dotFile )
-                dotFile= re.sub( os.path.sep, ".", modPath ).lstrip(".") 
-                dyn_mod= importlib.import_module( modName, dotFile )
-                mainMethod= getattr( dyn_mod, "main" )
-                mainMethod( self.topWidget.tmObj, \
-                           block= False, \
-                           show= True, \
-                           jpEObj= self._pyPlotUpdater, \
-                           xDataVar= self.xdat_le.text().strip() )
+                q= multiprocessing.Queue()
+                mDict= { "multproc": True, "multiprocQueue": q }
+                mProc= multiprocessing.Process( target= jpExtend.plotUpdater.multiprocessRunner, \
+                                             args= passArgs, \
+                                             kwargs= mDict, \
+                                           )
+                mProc.start()
+                self._multiProcRunningList.append( ( mProc, q ) )
+                self._allMultiProcRunningList.append( ( mProc, q ) )
                 
-                self._pyPlotUpdater.updatePlots( \
-                                                 self._slider.value(), \
-                                                 putInBack= True, \
-                                                 startIndex= preLenOfUpdates )
             except:
                 traceback.print_exc()
-                warnings.warn( "Plot didn't work: " + aFile )
-             
+                try:
+                    mProc.Terminate()
+                except:
+                    print("unable to terminate plot process")
+                
+        
+        self.setEnabled( True )
+        self.topWidget.enableMenus()
+    
+        print("done execute")
+    
     def _push2Right( self ):
+        """
+        push from left list box to right list box
+        """
         llb= self.fsl1
         selectedTextList= [ llb.item( itemIdx ).text() \
                               for itemIdx in range( llb.count() ) 
@@ -238,6 +356,9 @@ class App( QWidget, gUWidgetBase ):
         self.fsl2._addListItems( selectedTextList )
         
     def _remFromRight( self ):
+        """
+        take away from right list box
+        """
         rlb= self.fsl2
         selectedTextList= [ rlb.item( itemIdx ).text() \
                               for itemIdx in range( rlb.count() ) 
@@ -251,6 +372,9 @@ class App( QWidget, gUWidgetBase ):
         self.fsl2._clearButtonPushed()
     
     def _fileSelect( self ):
+        """
+        select .py files
+        """
         grabDirectory= self.fcb.isChecked()
         if self.fcb.isChecked():
             startDirField= "startDir2"
@@ -268,7 +392,16 @@ class App( QWidget, gUWidgetBase ):
         
         if fileNames is not None:
             self.fsl1._addListItems( fileNames )
-       
+    
+    def _changedTm( self ):
+        """
+        reset everything when tm has been changed
+        """
+        self._slider.setMaximum( self.getNumFrames() )
+        self._slider.setValue( 0 )
+        self._frameLineEdit.numFrames= self.getNumFrames()
+        self._frameLineEdit.setText( str(0) )
+      
     def _setupLayout( self, makeSlider ):
         mainLayout= QGridLayout()
         
@@ -292,11 +425,16 @@ class App( QWidget, gUWidgetBase ):
         qgb.setLayout( lgb )
         topRow.addWidget( qgb )
         
-        topRow.addWidget( self.exeb )
-        topRow.addWidget( self.saveListb )
-        topRow.addWidget( self.loadListb )
-#         layout.addWidget( l2, 0, 0 )
+        twoButtonLayout= QVBoxLayout()
+        twoButtonLayout.addWidget( self.exeb )
+        twoButtonLayout.addWidget( self.distb )
+        topRow.addLayout( twoButtonLayout )
         
+        twoButtonLayout= QVBoxLayout()
+        twoButtonLayout.addWidget( self.saveListb )
+        twoButtonLayout.addWidget( self.loadListb )
+        topRow.addLayout( twoButtonLayout )
+
         l2= QGridLayout()
         l2.addWidget( self.pbr, 0, 0 )
         l2.addWidget( self.pbl, 0, 1 )
@@ -311,15 +449,14 @@ class App( QWidget, gUWidgetBase ):
         if makeSlider:
             sliderLayout= QHBoxLayout()
             self._slider= mySlider( self, self.topWidget, \
-                                    numFrames= self.topWidget.tmObj.numFrames )
+                                    numFrames= self.getNumFrames() )
             sliderLayout.addWidget( self._slider )
             
             self._frameLineEdit= myFrameEdit( self, self.topWidget, \
-                                             numFrames= self.topWidget.tmObj.numFrames )
+                                             numFrames= self.getNumFrames() )
             self._frameLineEdit.setText( str(0) )
             self._frameLineEdit.setMaximumHeight(30)
             self._frameLineEdit.setMaximumWidth(50)
-            self._frameLineEdit.textChanged.connect( self.frameTextChanged )
             sliderLayout.addWidget( self._frameLineEdit )
             
             mainLayout.addLayout( sliderLayout, row, 0 )
@@ -329,27 +466,13 @@ class App( QWidget, gUWidgetBase ):
         row += 1
         mainLayout.addLayout( l2, row, 0 )
         self.setLayout( mainLayout )
-        
-    def frameTextChanged( self ):
-        try:
-            le= self._frameLineEdit
-            slider= self._slider
-            
-            val= int( le.text().strip() )
-            if val < 0:
-                val= 0
-            if val >= le.numFrames:
-                val= le.numFrames-1
-            
-            sliderVal= int( slider.value() )
-            
-            if val != sliderVal:
-                """ slider does the update """
-                slider.setValue( val )
-                
-        except:
-            pass
-        
+    
+    def getNumFrames( self ):
+        if self.topWidget.tmObj is not None:
+            return self.topWidget.tmObj.numFrames
+        else:
+            return 0
+      
     def resetGuiDefaults( self ):
         self.guiData.resetStoredDefaults()
         self.fsl1.resetGuiDefaults()

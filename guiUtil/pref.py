@@ -189,7 +189,7 @@ class pref( object ):
     # end save
 
     def delete( self, group= DEF_GROUPSTR, name= None ):
-        "delete data from the preference file"
+        """delete data from the preference file"""
         if not os.path.exists( self.file ):
             return
         

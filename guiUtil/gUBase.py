@@ -7,9 +7,20 @@ import os
 from PyQt5.Qt import *
 
 from guiUtil.guidata import guiData
+from threading import Thread
+
+class myThread( Thread ):
+    """
+    stoppable thread...don't even know if I need this
+    """
+    def __init__( self, *args, **kwargs ):
+        Thread.__init__( self, *args, **kwargs )
+        self.stop= False
 
 class gUWidgetBase( object ):
-
+    """
+    base class for most of the gui stuff.
+    """
     def __init__( self, guiDataOverride= None, **kwargs ):
         
         self.qmw= None
@@ -46,6 +57,9 @@ class gUWidgetBase( object ):
         return False
         
     def _initGuiData( self, idd= None, persistentDir= None, persistentFile= None, prefGroup= None, **kwargs ):
+        """
+        common way everyone inits their persistent gui data
+        """
         assert idd is not None, "must define initial data dict"    
         
         guiDataObj= guiData( persistentDir= persistentDir, \

@@ -211,10 +211,9 @@ def fileSelectRemember( guiData, startDirField, \
                     fileNames.append( tFile )
     else:
         startDir= getattr( guiData, startDirField )[0]
-
         if not os.path.isdir( startDir ):
             startDir= guiUtil.gUBase.home()
-        fileNames= qfd.getOpenFileNames( caption= "select exe(s)", directory= startDir )
+        fileNames= qfd.getOpenFileNames( caption= caption, directory= startDir, filter= fileListFilter )
     
     if isinstance( fileNames, tuple ):
         fileTypeSelectedAllowed= fileNames[1]

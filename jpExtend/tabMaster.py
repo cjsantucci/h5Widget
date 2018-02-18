@@ -1,16 +1,21 @@
 #!/usr/local/bin/anaconda3/bin/python
 from PyQt5.Qt import *
 
+import jpExtend
+import matplotlib
+matplotlib.use( jpExtend.matploblib_backend )
+import matplotlib.pyplot as plt
+plt.ion()
 import argparse as ap
 import functools as ft
 import getpass as gp
-import matplotlib.pyplot as plt
 import os
 from queue import Queue, Empty
 import signal
 import sys
+import time
 from threading import Lock
-from threading import Thread
+import traceback
 import warnings
 
 import guiUtil
@@ -18,29 +23,27 @@ from guiUtil.fileSelect import fileSelectRemember
 from guiUtil.fileSelectListWidget import fileSelectList
 from guiUtil.gUBase import gUWidgetBase
 from guiUtil.guidata import guiData
-import jpExtend
 from jpExtend.h5Widget import App as h5App
 from jpExtend.pyPlotWidget import App as pyPlotApp
 
-class dummyTM2Remove():
-    
-    def __init__( self, tmFile ):
-        self.numFrames= 25
+class dummyTM2Remove( ):
+    """
+    This is the placeholder for the tm object to prototype the gui etc
+    """
+    def __init__( self, tmFile, numFrames= 25  ):
+        self.numFrames= numFrames
         self.filename= tmFile
 
 class myQmw( QMainWindow ):
-    
+    """
+    qmain window class to override close functionality
+    """
     def __init__( self, mainProgram= None ):
         QMainWindow.__init__( self )
         self.mainProgram= mainProgram
         
     def closeEvent(self, *args, **kwargs):
         self.mainProgram.closeEvent( *args, **kwargs )
-
-class myThread( Thread ):
-    def __init__( self, *args, **kwargs ):
-        Thread.__init__( self, *args, **kwargs )
-        self.stop= False
 
 class tabMaster( QObject, gUWidgetBase ):
     """
@@ -49,40 +52,45 @@ class tabMaster( QObject, gUWidgetBase ):
     _fifoUpdateSignal= pyqtSignal()
 
     def __init__( self, *args, tmFile= None, commandLineArgs= None, **kwargs ):
-        
+
         QObject.__init__( self )
         gUWidgetBase.__init__( self, **kwargs )
         
         self._fifoQ= Queue()
         self._tmObj= None
+        self.currentMenu= None
         
         self._verbose= commandLineArgs.verbose
 
-                
+        """the gui data object holds the defaults for 
+        gui objects
+        """                
         idd= { \
           "fileOpenTm": [ guiUtil.gUBase.home() ], \
         }
         self._initGuiData( idd= idd, prefGroup= "/tabMaster", **kwargs )
-
         
-        self._openFileSelect( tmFile= tmFile, startup= True )
-            
+        if tmFile is not None and os.path.exists( tmFile ):            
+            self.guiData.fileOpenTm= os.path.dirname( tmFile )
+        
+        """
+        if there is a fifo file from a controlling
+        program open, read and kick off daemon thread
+        to continuiously get the information
+        """
+        
         self._fifoFile= commandLineArgs.fifoFile
         self._fifoLock= None
         self._fifoReadThread= None
-
+        makeSlider= True
         if self._fifoFile is not None:
             self._fifoUpdateSignal.connect( self.fifoThreadUpdate )
             self._fifoLock= Lock()
-            
             self._kickOffReadThread()
-            makeSlider= True
-        else:
-            makeSlider= True
         
         width= 900
         height= 250
-        
+                
         tabs    = QTabWidget()
         self.qmw.mainProgram= self
         self.tabs= tabs
@@ -111,7 +119,10 @@ class tabMaster( QObject, gUWidgetBase ):
                                  makeSlider= makeSlider, \
                                  **kwargs )
             self.plotterWidgetTab= tab2
+            self.enableCritical( False )
             tabs.addTab( tab2, "plt_exe" )
+
+#         self._openFileSelect( tmFile= "/home/chris/Music/0001.tm" 
 
         tab3    = QWidget()
         tab4    = QWidget()
@@ -129,10 +140,18 @@ class tabMaster( QObject, gUWidgetBase ):
             centerPoint= tab2.centerOfScreenForCurrentMouse()
             self.qmw.setGeometry( QRect( centerPoint.x()-width/2, centerPoint.y()-height/2, width, height ) )
         
+            
+        
         self.qmw.show()
         self.app.processEvents()
         sys.exit( self.app.exec_() )
     
+    def enableMenus( self, inVal= True ):
+        self.currentMenu.setEnabled( inVal )
+    
+    def enableCritical( self, inVal= True ):
+        self.plotterWidgetTab.setEnabled( inVal )
+        
     def _onChange( self ):
         
         if hasattr( self, "_allowMenuChangesNow" ) and self._allowMenuChangesNow:
@@ -161,10 +180,13 @@ class tabMaster( QObject, gUWidgetBase ):
                 resetMenu.addAction( "Reset", currentTab.resetGuiDefaults )
                 menu.addMenu( resetMenu )
             
+            self.currentMenu= menuBar
+            
             self.qmw.setMenuBar( menuBar )
     
     def closeEvent( self, event ):
         plt.close("all")
+        self.plotterWidgetTab.closeEvent()
         if self._fifoReadThread is not None:
             self._fifoReadThread.stop= True
         event.accept()
@@ -180,7 +202,10 @@ class tabMaster( QObject, gUWidgetBase ):
                                           fileListFilter= "TM/H5 files (*.tm *.tm.gz *.h5)" ) 
             if fileList is None:
                 if startup:
-                    sys.exit()
+                    """
+                    this is the path it gets to in startup
+                    """
+                    return
                 else:
                     return
             else:
@@ -198,27 +223,81 @@ class tabMaster( QObject, gUWidgetBase ):
                 if os.path.isfile( h5File ):
                     tmFile= h5File
         
-        if not startup and self.tmObj.filename == tmFile:
+        if not startup and (self.tmObj is not None) and (self.tmObj.filename == tmFile):
             return
-        elif self.tmObj is None:
-            assert os.path.isfile( tmFile ), "File DNE: " + tmFile        
-            self.tmObj= dummyTM2Remove( tmFile )
-        else:
-            assert os.path.isfile( tmFile ), "File DNE: " + tmFile        
-            self.tmObj= dummyTM2Remove( tmFile )
-            self._disconnectOldPlots()
-    
-    def updateAll( self, frame ):
         
-        self.plotterWidgetTab._pyPlotUpdater.updatePlots( \
-            frame, \
-            )
+        elif self.tmObj is None: # this will happen the first time you select a file
+            if not os.path.isfile( tmFile ):
+                QMessageBox.warning( self.tabs, "Message" , "could not open tm: " + tmFile )
+                return
+            try:
+                if self._fifoLock is not None:
+                    self._fifoLock.acquire()
+                
+                self.tmObj= dummyTM2Remove( tmFile )
+                self._changedTm()
+                
+                if self._fifoLock is not None:
+                    self._fifoLock.release()
+            except:
+                traceback.print_exc()
+                QMessageBox.critical( self.tabs, "Message" , "failed to process new TM" )
+                time.sleep(5)
+                sys.exit()
+                
+        else:
+            if not os.path.isfile( tmFile ):
+                QMessageBox.warning( self.tabs, "Message" , "could not open tm: " + tmFile )
+                return
+            
+            try:                
+                if self._fifoLock is not None:
+                    self._fifoLock.acquire()
+
+                
+                self.tmObj= dummyTM2Remove( tmFile )
+                self._changedTm()
+                self._disconnectOldPlots()
+
+                if self._fifoLock is not None:
+                    self._fifoLock.release()
+
+            except:
+                traceback.print_exc()
+                QMessageBox.critical( self.tabs, "Message" , "failed to process new TM" )
+                time.sleep(5)
+                sys.exit()
+        
+    def _changedTm( self ):
+        """function performs whenever tm changes so everything gets the information"""
+        try:
+            self.plotterWidgetTab._changedTm()
+            self.enableCritical( True )
+        except:
+            QMessageBox.critical( self, "Message" , "failed to communicate tm obj to children" )
+            time.sleep(5)
+            sys.exit()
+            traceback.print_exc()
+    
+    def _updateAll( self, frame ):
+        """
+        update all plots
+        """
+        self.plotterWidgetTab._updateAll( frame )
     
     def _disconnectOldPlots( self ):
-        pass
-    
+        """
+        when tmFile is changed abandon updating of 
+        old plots
+        """
+        self.plotterWidgetTab._disconnectOldPlots()
+             
     @pyqtSlot()
     def fifoThreadUpdate( self ):
+        """
+        when the frame comes in from the controlling program
+        here is where we update
+        """
         self._fifoLock.acquire()
         
         if self._fifoQ.empty():
@@ -237,7 +316,7 @@ class tabMaster( QObject, gUWidgetBase ):
         self.plotterWidgetTab.setEnabled( False )
         self.plotterWidgetTab._slider.setEnabled( False )
         
-        self.updateAll( frame )
+        self._updateAll( frame )
     
         self.h5WidgetTab.setEnabled( True )
         self.plotterWidgetTab.setEnabled( True )
@@ -248,7 +327,7 @@ class tabMaster( QObject, gUWidgetBase ):
     
     def _kickOffReadThread( self ):
 
-        thread= myThread( target = self._readThreadMethod,
+        thread= guiUtil.gUBase.myThread( target = self._readThreadMethod,
                 args= ( self._fifoFile, self._fifoQ, self._fifoLock, self._fifoUpdateSignal ) )
         
         thread.daemon = True                            # Daemonize thread
